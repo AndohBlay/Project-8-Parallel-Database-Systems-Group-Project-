@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parallel DB Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0f1419; --card:#18202a; --line:#2a3644; --text:#e6edf3; --mute:#8b98a5; --acc:#4da3ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:16px; }
+  header h1 { margin:0; font-size:20px; }
+  header span { color:var(--mute); font-size:13px; }
+  nav { display:flex; gap:4px; padding:0 24px; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:none; color:var(--mute); padding:12px 16px; cursor:pointer; font-size:14px; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--text); border-bottom-color:var(--acc); }
+  nav button:disabled { opacity:.35; cursor:not-allowed; }
+  main { padding:24px; max-width:1200px; margin:0 auto; }
+  .tab { display:none; } .tab.active { display:block; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid .card { margin-bottom:0; }
+  .card h3 { margin:0 0 4px; font-size:16px; display:flex; align-items:center; gap:8px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--ok); display:inline-block; }
+  .dot.down { background:var(--bad); }
+  .stat { display:flex; justify-content:space-between; font-size:13px; padding:3px 0; color:var(--mute); }
+  .stat b { color:var(--text); font-weight:600; }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0 10px; }
+  .chip { font-size:12px; padding:2px 8px; border-radius:12px; background:var(--acc); color:#06121f; font-weight:600; }
+  .chip.rep { background:none; border:1px dashed var(--mute); color:var(--mute); font-weight:400; }
+  .chip.small { font-weight:400; background:var(--bg); color:var(--mute); border:1px solid var(--line); }
+  .label { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); margin-top:10px; }
+  h2 { font-size:16px; margin:28px 0 10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--mute); font-weight:500; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:12px; }
+  select, input { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font-size:14px; }
+  input { width:90px; }
+  label { font-size:12px; color:var(--mute); display:block; margin-bottom:4px; }
+  .btn { background:var(--acc); color:#06121f; border:none; border-radius:6px; padding:9px 18px; font-weight:600; cursor:pointer; font-size:14px; }
+  .btn.alt { background:none; border:1px solid var(--acc); color:var(--acc); }
+  .btn.go { background:var(--ok); }
+  .btn:disabled { opacity:.5; cursor:wait; }
+  ol.plan { margin:8px 0 0; padding-left:20px; color:var(--mute); font-size:13px; line-height:1.7; }
+  .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:16px 0; }
+  .metric { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .metric .v { font-size:22px; font-weight:700; }
+  .metric .k { font-size:12px; color:var(--mute); }
+  .bar-row { display:grid; grid-template-columns:70px 1fr 90px; gap:10px; align-items:center; margin:6px 0; font-size:13px; }
+  .bar { height:16px; background:var(--bg); border-radius:4px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--acc); }
+  .bar.hot > div { background:var(--warn); }
+  .lbar { position:relative; height:22px; background:var(--bg); border-radius:4px; }
+  .lbar > div { height:100%; background:var(--acc); border-radius:4px; }
+  .lbar.hot > div { background:var(--warn); }
+  .lbar .mark { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--text); opacity:.7; }
+  .nodeload { margin-bottom:14px; }
+  .nodeload .head { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+  .err { color:var(--bad); margin-top:12px; }
+  .ok { color:var(--ok); }
+  .mute { color:var(--mute); font-size:13px; }
+  .status { margin-top:8px; min-height:18px; }
+</style>
+</head>
+<body>
+<header><h1>Parallel Database Dashboard</h1><span>shared-nothing · hash-partitioned · replicated</span></header>
+<nav>
+  <button class="active" data-tab="cluster">Cluster</button>
+  <button data-tab="lab">Query Lab</button>
+  <button data-tab="balance">Load Balance</button>
+  <button disabled title="Step 5">Fault Tolerance</button>
+  <button disabled title="Step 6">Benchmark</button>
+</nav>
+<main>
+
+  <section id="cluster" class="tab active">
+    <div class="grid" id="nodeGrid"></div>
+    <h2>Partition placement</h2>
+    <div class="card"><table id="placement"></table></div>
+  </section>
+
+  <section id="lab" class="tab">
+    <div class="card">
+      <div class="row">
+        <div><label>Query</label><select id="querySel"></select></div>
+        <div class="row" id="params" style="margin:0"></div>
+        <button class="btn" id="runBtn">Run in parallel</button>
+      </div>
+      <div class="mute" id="qdesc"></div>
+      <ol class="plan" id="qplan"></ol>
+    </div>
+    <div id="results" style="display:none">
+      <div class="metrics" id="metrics"></div>
+      <div class="card"><div class="label" style="margin-top:0">Time per node (ms)</div><div id="bars"></div></div>
+      <h2>Merged result</h2>
+      <div class="card"><table id="resTable"></table></div>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section id="balance" class="tab">
+    <div class="card">
+      <div class="row">
+        <button class="btn alt" id="genUniform">1. Generate uniform data</button>
+        <button class="btn alt" id="genSkew">1. Generate skewed data</button>
+        <button class="btn" id="measureBtn">2. Measure query speed</button>
+        <button class="btn go" id="rebalBtn">3. Rebalance now</button>
+      </div>
+      <div class="mute">Skewed data puts about 55% of all orders on Node 0's partitions (a hot node). Demo: generate skewed data, measure, rebalance, measure again. Generating takes 30 to 60 seconds.</div>
+      <div class="mute status" id="balStatus"></div>
+      <div class="err" id="balErr"></div>
+    </div>
+
+    <div class="metrics" id="balMetrics"></div>
+
+    <div class="card">
+      <div class="label" style="margin-top:0">Load per node (share of all rows served; white line = perfectly even)</div>
+      <div id="loadBars" style="margin-top:12px"></div>
+    </div>
+
+    <div id="rebalResult" style="display:none">
+      <h2>Last rebalance</h2>
+      <div class="card">
+        <div id="rebalSummary"></div>
+        <table id="movesTable" style="margin-top:10px"></table>
+      </div>
+    </div>
+
+    <h2>Measurements (median of 5 runs of the orders ⋈ lineitem join)</h2>
+    <div class="card"><table id="histTable"></table></div>
+  </section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = v => typeof v === 'number' ? v.toLocaleString(undefined, {maximumFractionDigits: 2}) : (v ?? '–');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+document.querySelectorAll('nav button[data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); $(b.dataset.tab).classList.add('active');
+  if (b.dataset.tab === 'cluster') loadCluster();
+  if (b.dataset.tab === 'balance') loadBalance();
+});
+
+/* ---------------- Cluster tab ---------------- */
+async function loadCluster() {
+  const d = await (await fetch('/api/cluster')).json();
+  $('nodeGrid').innerHTML = d.nodes.map(n => {
+    const reps = n.stored_partitions.filter(p => !n.primary_partitions.includes(p));
+    return `<div class="card">
+      <h3><span class="dot ${n.alive ? '' : 'down'}"></span>Node ${n.node}</h3>
+      <div class="label">Primary partitions</div>
+      <div class="chips">${n.primary_partitions.map(p => `<span class="chip">P${p}</span>`).join('')}</div>
+      <div class="label">Replica partitions</div>
+      <div class="chips">${reps.map(p => `<span class="chip rep">P${p}</span>`).join('')}</div>
+      <div class="stat"><span>Orders (primary)</span><b>${fmt(n.orders_primary)}</b></div>
+      <div class="stat"><span>Lineitems (primary)</span><b>${fmt(n.lineitem_primary)}</b></div>
+      <div class="stat"><span>Orders stored (incl. replicas)</span><b>${fmt(n.orders_stored)}</b></div>
+      <div class="stat"><span>Customers (replicated)</span><b>${fmt(n.customers)}</b></div>
+    </div>`;
+  }).join('');
+  $('placement').innerHTML = '<tr><th>Partition</th><th>Primary node</th><th>Replica node(s)</th></tr>' +
+    d.placement.map(r => `<tr><td>P${r.partition}</td><td>Node ${r.nodes[0]}</td><td>${r.nodes.slice(1).map(x => 'Node ' + x).join(', ')}</td></tr>`).join('');
+}
+
+/* ---------------- Query Lab tab ---------------- */
+let queries = [];
+async function loadQueries() {
+  queries = await (await fetch('/api/queries')).json();
+  $('querySel').innerHTML = queries.map(q => `<option value="${q.id}">${esc(q.title)}</option>`).join('');
+  showQuery();
+}
+function showQuery() {
+  const q = queries.find(x => x.id === $('querySel').value);
+  $('qdesc').textContent = q.description;
+  $('qplan').innerHTML = q.plan.map(s => `<li>${esc(s)}</li>`).join('');
+  $('params').innerHTML = Object.entries(q.params).map(([k, v]) =>
+    `<div><label>${esc(k)}</label><input data-p="${esc(k)}" value="${v}"></div>`).join('');
+}
+$('querySel').onchange = showQuery;
+
+$('runBtn').onclick = async () => {
+  const btn = $('runBtn'); btn.disabled = true; $('err').textContent = '';
+  const params = {};
+  document.querySelectorAll('#params input').forEach(i => params[i.dataset.p] = i.value);
+  try {
+    const r = await fetch('/api/query', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: $('querySel').value, params})});
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    render(d);
+  } catch (e) { $('err').textContent = 'Error: ' + e.message; }
+  btn.disabled = false;
+};
+
+function render(d) {
+  $('results').style.display = 'block';
+  const slowest = Math.max(...d.per_node.map(n => n.ms));
+  const sum = d.per_node.reduce((a, n) => a + n.ms, 0);
+  const shipped = d.per_node.reduce((a, n) => a + n.rows_returned, 0);
+  $('metrics').innerHTML = [
+    ['Total response time', d.total_ms.toFixed(1) + ' ms'],
+    ['Slowest node', slowest.toFixed(1) + ' ms'],
+    ['Sum of node work', sum.toFixed(1) + ' ms'],
+    ['Merge time', d.merge_ms.toFixed(2) + ' ms'],
+    ['Rows sent to coordinator', fmt(shipped)],
+  ].map(([k, v]) => `<div class="metric"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+  $('bars').innerHTML = d.per_node.map(n =>
+    `<div class="bar-row"><span>Node ${n.node}</span><div class="bar"><div style="width:${(n.ms / slowest * 100).toFixed(1)}%"></div></div><span>${n.ms.toFixed(1)} ms</span></div>`).join('');
+  $('resTable').innerHTML = '<tr>' + d.columns.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>' +
+    d.rows.map(r => '<tr>' + r.map(v => `<td class="${typeof v === 'number' ? 'num' : ''}">${esc(fmt(v))}</td>`).join('') + '</tr>').join('');
+}
+
+/* ---------------- Load Balance tab ---------------- */
+const history = [];
+const balButtons = ['genUniform', 'genSkew', 'measureBtn', 'rebalBtn'];
+
+function setBusy(busy, msg) {
+  balButtons.forEach(id => $(id).disabled = busy);
+  $('balStatus').textContent = msg || '';
+  if (busy) $('balErr').textContent = '';
+}
+async function post(url, body) {
+  const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+function stateLabel(s) {
+  return `${s.data_mode} data, ${s.rebalances ? 'after rebalance' : 'initial placement'}`;
+}
+
+async function loadBalance() {
+  try { renderBalance(await (await fetch('/api/balance')).json()); }
+  catch (e) { $('balErr').textContent = 'Error: ' + e.message; }
+}
+
+function renderBalance(d) {
+  if (d.error) { $('balErr').textContent = d.error; return; }
+  const alive = d.nodes.filter(n => n.alive).length || 1;
+  const even = 100 / alive;
+  const hottest = d.nodes.reduce((a, n) => n.share > a.share ? n : a, d.nodes[0]);
+  $('balMetrics').innerHTML = [
+    ['Imbalance (max ÷ mean, 1.00 = perfect)', d.max_over_mean.toFixed(2)],
+    ['Coefficient of variation', d.cv.toFixed(3)],
+    ['Hottest node', `Node ${hottest.node} (${hottest.share}%)`],
+    ['State', stateLabel(d.state)],
+  ].map(([k, v]) => `<div class="metric"><div class="v" style="font-size:${k === 'State' ? 15 : 22}px">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join('');
+
+  const scale = Math.max(...d.nodes.map(n => n.share), even) * 1.1;
+  $('loadBars').innerHTML = d.nodes.map(n => {
+    const hot = n.share > even * 1.15;
+    return `<div class="nodeload">
+      <div class="head"><span>Node ${n.node}</span><span>${n.share}% · ${fmt(n.load)} rows</span></div>
+      <div class="lbar ${hot ? 'hot' : ''}"><div style="width:${(n.share / scale * 100).toFixed(1)}%"></div><span class="mark" style="left:${(even / scale * 100).toFixed(1)}%"></span></div>
+      <div class="chips">${n.partitions.map(p => `<span class="chip small">P${p.partition} · ${fmt(p.total)}</span>`).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderHistory() {
+  $('histTable').innerHTML = '<tr><th>State</th><th>Median</th><th>Fastest</th><th>Slowest</th><th>Busiest node (avg)</th><th>Imbalance</th></tr>' +
+    history.map(h => `<tr><td>${esc(h.label)}</td><td class="num"><b>${h.median.toFixed(1)} ms</b></td><td class="num">${h.min.toFixed(1)} ms</td><td class="num">${h.max.toFixed(1)} ms</td><td class="num">${h.busy.toFixed(1)} ms</td><td class="num">${h.ratio.toFixed(2)}</td></tr>`).join('');
+}
+
+async function generate(skewed) {
+  setBusy(true, `Generating ${skewed ? 'skewed' : 'uniform'} data and restarting the nodes (30 to 60 seconds)...`);
+  try {
+    await post('/api/balance/generate', {skewed});
+    await loadBalance(); loadCluster();
+    $('rebalResult').style.display = 'none';
+  } catch (e) { $('balErr').textContent = 'Error: ' + e.message; }
+  setBusy(false, 'Done.');
+}
+$('genUniform').onclick = () => generate(false);
+$('genSkew').onclick = () => generate(true);
+
+$('measureBtn').onclick = async () => {
+  setBusy(true, 'Running the join 6 times (first run is a warm-up)...');
+  try {
+    const d = await post('/api/balance/measure');
+    history.push({label: stateLabel(d.balance.state), median: d.median_ms, min: d.min_ms, max: d.max_ms,
+                  busy: Math.max(...d.per_node.map(n => n.avg_ms)), ratio: d.balance.max_over_mean});
+    renderHistory(); renderBalance(d.balance);
+  } catch (e) { $('balErr').textContent = 'Error: ' + e.message; }
+  setBusy(false, 'Done.');
+};
+
+$('rebalBtn').onclick = async () => {
+  setBusy(true, 'Rebalancing: measuring partitions, planning, moving data, verifying...');
+  try {
+    const d = await post('/api/balance/rebalance');
+    renderBalance(d.balance);
+    $('rebalResult').style.display = 'block';
+    $('rebalSummary').innerHTML =
+      `<div>Imbalance: <b>${d.before.max_over_mean.toFixed(2)}</b> → <b>${d.after.max_over_mean.toFixed(2)}</b> &nbsp;·&nbsp; ` +
+      `Node shares: ${d.before.shares.join('% / ')}% → ${d.after.shares.join('% / ')}% &nbsp;·&nbsp; ` +
+      `Rows copied: <b>${fmt(d.rows_moved)}</b></div>` +
+      `<div class="${d.verified ? 'ok' : 'err'}" style="margin-top:6px">${d.verified ? 'Verified: query results are identical before and after the rebalance.' : 'WARNING: results differ before and after the rebalance!'}</div>`;
+    $('movesTable').innerHTML = d.moves.length
+      ? '<tr><th>Partition</th><th>From</th><th>To</th><th>Method</th><th>Rows copied</th></tr>' +
+        d.moves.map(m => `<tr><td>P${m.partition}</td><td>Node ${m.from}</td><td>Node ${m.to}</td><td>${esc(m.type)}</td><td class="num">${fmt(m.rows)}</td></tr>`).join('')
+      : '<tr><td>Already balanced, nothing to move.</td></tr>';
+  } catch (e) { $('balErr').textContent = 'Error: ' + e.message; }
+  setBusy(false, 'Done. Now click "Measure query speed" again.');
+};
+
+loadCluster();
+loadQueries();
+</script>
+</body>
+</html>
